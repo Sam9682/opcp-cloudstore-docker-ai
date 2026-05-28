@@ -1561,7 +1561,7 @@ configure_nginx() {
 }
 
 setup_modsecurity_config() {
-    source ./setup_modsecurity_config.sh
+    source "$(dirname "${BASH_SOURCE[0]}")/setup_modsecurity_config.sh"
 }
 
 check_and_enable_modsecurity() {
