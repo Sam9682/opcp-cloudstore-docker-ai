@@ -141,7 +141,7 @@ print_success "AWS credentials configured"
 
 # Clone repository
 print_step "Cloning opcp-cloudstore-docker-ai repository..."
-git clone git@github.com:Sam9682/opcp-cloudstore-docker-ai.git > /dev/null 2>&1
+git clone https://github.com/Sam9682/opcp-cloudstore-docker-ai.git > /dev/null 2>&1
 cd opcp-cloudstore-docker-ai
 git submodule update --init --recursive > /dev/null 2>&1
 print_success "Repository cloned"
