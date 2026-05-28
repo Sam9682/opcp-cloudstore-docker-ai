@@ -92,7 +92,7 @@ Headers:
 Body:
 {
   "event_id": "uuid",
-  "timestamp": "2024-01-15T10:30:00Z",
+  "timestamp": "2026-01-15T10:30:00Z",
   "table": "users",
   "operation": "INSERT",
   "data": {...},
@@ -108,7 +108,7 @@ Response:
 {
   "status": "healthy",
   "queue_size": 5,
-  "timestamp": "2024-01-15T10:30:00Z"
+  "timestamp": "2026-01-15T10:30:00Z"
 }
 ```
 
