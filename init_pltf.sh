@@ -44,7 +44,7 @@ print_success "Amazon Kiro CLI installed"
 # Install OVH shai
 print_step "Installing OVH CLI..."
 curl -fsSL https://raw.githubusercontent.com/ovh/shai/main/install.sh | sh > /dev/null 2>&1
-echo 'export PATH="/home/ubuntu/.local/bin:$PATH"' >> ~/.bashrc
+echo 'export PATH="~/.local/bin:$PATH"' >> ~/.bashrc
 print_success "OVH CLI installed"
 
 # Install AWS CLI
@@ -157,8 +157,10 @@ print_success "Python environment ready"
 print_step "Final configuration..."
 mkdir -p logs
 chmod +x setup_modsecurity_config.sh
-sudo -u ubuntu mkdir ~/deployments
-sudo -u ubuntu mkdir ~/deployments/admin
+cd ~
+mkdir -p deployments
+cd deployments
+mkdir -p admin
 print_success "Configuration complete"
 
 echo ""
