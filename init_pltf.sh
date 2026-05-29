@@ -157,8 +157,8 @@ print_success "Python environment ready"
 print_step "Final configuration..."
 mkdir -p logs
 chmod +x setup_modsecurity_config.sh
-mkdir deploytments
-mkdir admin
+sudo -u ubunru mkdir ~/deployments
+sudo -u ubuntu kdir ~/deployments/admin
 print_success "Configuration complete"
 
 echo ""
