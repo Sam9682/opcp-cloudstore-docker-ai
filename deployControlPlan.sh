@@ -58,6 +58,7 @@ NAME_OF_APPLICATION=${NAME_OF_APPLICATION:-"ai-swautomorph"}
 APPLICATION_IDENTITY_NUMBER=${APPLICATION_IDENTITY_NUMBER:-0}
 RANGE_START_CONTROLPLAN=${RANGE_START_CONTROLPLAN:-80}
 RANGE_RESERVED_CONTROLPLAN=${RANGE_RESERVED_CONTROLPLAN:-0}
+S3_BUCKET_NAME=${S3_BUCKET_NAME:-"opcp-psmc-s3"}
 
 # Global Parameters (command line args override config)
 COMMAND=${1:-help}
@@ -392,7 +393,7 @@ backup_logs() {
 
     if [ -d "logs" ] && [ "$(ls -A logs 2>/dev/null)" ]; then
         echo "  📄 Synchronizing logs to S3..."
-        aws s3 sync ./logs s3://softfluid/ai-swautomorph/logs --profile OVH-SWAUTOMORPH
+        aws s3 sync ./logs s3://${S3_BUCKET_NAME}/ai-swautomorph/logs --profile OVH-SWAUTOMORPH
         echo -e "  $OK Logs backup completed"
     else
         echo -e "  $WARN No logs directory or logs found - skipping backup"
@@ -440,10 +441,12 @@ recover_database() {
     echo "📍 Select backup source:"
 
     if python3 -c "from simple_term_menu import TerminalMenu" 2>/dev/null; then
-        BACKUP_SOURCE=$(python3 << 'EOF'
+        BACKUP_SOURCE=$(S3_BUCKET_NAME="$S3_BUCKET_NAME" python3 << 'EOF'
+import os
 from simple_term_menu import TerminalMenu
 
-options = ["Local backups (./softfluid/db/backup)", "Remote S3 backups (s3://softfluid/ai-swautomorph/db/backup)"]
+s3_bucket = os.environ.get('S3_BUCKET_NAME', 'opcp-psmc-s3')
+options = ["Local backups (./softfluid/db/backup)", f"Remote S3 backups (s3://{s3_bucket}/ai-swautomorph/db/backup)"]
 terminal_menu = TerminalMenu(
     options,
     title="📍 Select backup source:",
@@ -460,7 +463,7 @@ EOF
     else
         # Fallback to numbered selection
         echo "1) Local backups (./softfluid/db/backup)"
-        echo "2) Remote S3 backups (s3://softfluid/ai-swautomorph/db/backup)"
+        echo "2) Remote S3 backups (s3://${S3_BUCKET_NAME}/ai-swautomorph/db/backup)"
         read -p "Select backup source (1-2): " choice
         case $choice in
             1) BACKUP_SOURCE="local" ;;
@@ -489,11 +492,11 @@ EOF
         echo "📡 Select backup server:"
 
         # List all available server IPs in S3
-        S3_SERVERS=$(aws s3 ls s3://softfluid/ai-swautomorph/db/backup/ --profile OVH-SWAUTOMORPH 2>/dev/null | grep "PRE" | awk '{print $2}' | sed 's/\///' | sort)
+        S3_SERVERS=$(aws s3 ls s3://${S3_BUCKET_NAME}/ai-swautomorph/db/backup/ --profile OVH-SWAUTOMORPH 2>/dev/null | grep "PRE" | awk '{print $2}' | sed 's/\///' | sort)
 
         if [ -z "$S3_SERVERS" ]; then
             echo -e "  $ERROR No server backups found in S3 bucket"
-            echo "    💡 Check S3 connection: aws s3 ls s3://softfluid/ai-swautomorph/db/backup/ --profile OVH-SWAUTOMORPH"
+            echo "    💡 Check S3 connection: aws s3 ls s3://${S3_BUCKET_NAME}/ai-swautomorph/db/backup/ --profile OVH-SWAUTOMORPH"
             exit 1
         fi
 
@@ -578,11 +581,11 @@ EOF
         echo "  ✅ Selected server: $SELECTED_SERVER"
 
         # List S3 backup directories for the selected server
-        S3_BACKUPS=$(aws s3 ls "s3://softfluid/ai-swautomorph/db/backup/$SELECTED_SERVER/" --profile OVH-SWAUTOMORPH 2>/dev/null | grep "PRE" | awk '{print $2}' | sed 's/\///' | sort -r)
+        S3_BACKUPS=$(aws s3 ls "s3://${S3_BUCKET_NAME}/ai-swautomorph/db/backup/$SELECTED_SERVER/" --profile OVH-SWAUTOMORPH 2>/dev/null | grep "PRE" | awk '{print $2}' | sed 's/\///' | sort -r)
 
         if [ -z "$S3_BACKUPS" ]; then
             echo -e "  $ERROR No backups found for server $SELECTED_SERVER in S3 bucket"
-            echo "    💡 Check S3 path: aws s3 ls s3://softfluid/ai-swautomorph/db/backup/$SELECTED_SERVER/ --profile OVH-SWAUTOMORPH"
+            echo "    💡 Check S3 path: aws s3 ls s3://${S3_BUCKET_NAME}/ai-swautomorph/db/backup/$SELECTED_SERVER/ --profile OVH-SWAUTOMORPH"
             exit 1
         fi
 
@@ -666,8 +669,8 @@ EOF
         mkdir -p "$BACKUP_DIR"
 
         # Download the selected backup from S3
-        echo "  📥 Syncing from s3://softfluid/ai-swautomorph/db/backup/$SELECTED_SERVER/$SELECTED_BACKUP/ ..."
-        if aws s3 sync "s3://softfluid/ai-swautomorph/db/backup/$SELECTED_SERVER/$SELECTED_BACKUP/" "$BACKUP_DIR/" --profile OVH-SWAUTOMORPH; then
+        echo "  📥 Syncing from s3://${S3_BUCKET_NAME}/ai-swautomorph/db/backup/$SELECTED_SERVER/$SELECTED_BACKUP/ ..."
+        if aws s3 sync "s3://${S3_BUCKET_NAME}/ai-swautomorph/db/backup/$SELECTED_SERVER/$SELECTED_BACKUP/" "$BACKUP_DIR/" --profile OVH-SWAUTOMORPH; then
             echo -e "  $OK Backup downloaded successfully"
         else
             echo -e "  $ERROR Failed to download backup from S3"
@@ -1092,6 +1095,73 @@ restart_services() {
     echo "✅ Services restarted"
 }
 
+# Upgrade the application by fetching and merging latest changes from git
+upgrade() {
+    echo "⬆️  Upgrading $NAME_OF_APPLICATION..."
+
+    # Check if we are in a git repository
+    if [ ! -d ".git" ]; then
+        echo -e "  $ERROR Not a git repository. Cannot upgrade."
+        exit 1
+    fi
+
+    # Show current branch and commit
+    CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+    CURRENT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null)
+    echo "  📍 Current branch: $CURRENT_BRANCH"
+    echo "  📍 Current commit: $CURRENT_COMMIT"
+
+    # Check for uncommitted changes
+    if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
+        echo -e "  $WARN Uncommitted changes detected. Stashing before upgrade..."
+        git stash
+        STASHED=true
+    else
+        STASHED=false
+    fi
+
+    # Fetch latest changes from remote
+    echo "  📥 Fetching latest changes from remote..."
+    if git fetch --all; then
+        echo -e "  $OK Fetch completed"
+    else
+        echo -e "  $ERROR Failed to fetch from remote"
+        if [ "$STASHED" = true ]; then
+            echo "  🔄 Restoring stashed changes..."
+            git stash pop
+        fi
+        exit 1
+    fi
+
+    # Merge changes
+    echo "  🔀 Merging changes from origin/$CURRENT_BRANCH..."
+    if git merge "origin/$CURRENT_BRANCH"; then
+        NEW_COMMIT=$(git rev-parse --short HEAD 2>/dev/null)
+        echo -e "  $OK Merge completed"
+        echo "  📍 New commit: $NEW_COMMIT"
+    else
+        echo -e "  $ERROR Merge failed (conflicts detected)"
+        echo "    💡 Resolve conflicts manually, then run: git merge --continue"
+        if [ "$STASHED" = true ]; then
+            echo "    💡 Stashed changes will need to be restored manually: git stash pop"
+        fi
+        exit 1
+    fi
+
+    # Restore stashed changes if any
+    if [ "$STASHED" = true ]; then
+        echo "  🔄 Restoring stashed changes..."
+        if git stash pop; then
+            echo -e "  $OK Stashed changes restored"
+        else
+            echo -e "  $WARN Conflict while restoring stashed changes"
+            echo "    💡 Resolve conflicts manually"
+        fi
+    fi
+
+    echo "✅ Upgrade completed successfully ($CURRENT_COMMIT → $NEW_COMMIT)"
+}
+
 restart_flask_service() {
     echo "  🔄 Restarting Flask application..."
 
@@ -1293,7 +1363,7 @@ configure_gitea() {
     sudo chmod a+w /home/ubuntu/admin/db/gitea.db
 
     # Create Gitea configuration
-    sudo tee /etc/gitea/app.ini > /dev/null << 'EOF'
+    sudo tee /etc/gitea/app.ini > /dev/null << EOF
 [database]
 DB_TYPE = sqlite3
 PATH = /home/ubuntu/admin/db/gitea.db
@@ -1302,10 +1372,10 @@ PATH = /home/ubuntu/admin/db/gitea.db
 ROOT = /home/ubuntu/admin/data/gitea-repositories
 
 [server]
-DOMAIN = www.softfluid.fr
+DOMAIN = www.${S3_BUCKET_NAME}.fr
 HTTP_ADDR = 0.0.0.0
 HTTP_PORT = 3000
-ROOT_URL = https://www.softfluid.fr/gitea/
+ROOT_URL = https://www.${S3_BUCKET_NAME}.com/gitea/
 
 [mailer]
 ENABLED = false
@@ -1362,7 +1432,7 @@ create_gitea_admin_user() {
     if timeout 10 sudo -u git -E /usr/local/bin/gitea admin user create \
         --username gitadmin \
         --password password \
-        --email admin@softfluid.fr \
+        --email admin@${S3_BUCKET_NAME}.fr \
         --admin \
         --config /etc/gitea/app.ini \
         --work-path /var/lib/gitea 2>/dev/null; then
@@ -1373,7 +1443,7 @@ create_gitea_admin_user() {
         sudo -u git -E /usr/local/bin/gitea admin user create \
             --username gitadmin \
             --password password \
-            --email admin@softfluid.fr \
+            --email admin@${S3_BUCKET_NAME}.fr \
             --admin \
             --config /etc/gitea/app.ini \
             --work-path /var/lib/gitea || echo "  ❌ Manual user creation also failed"
@@ -1382,7 +1452,7 @@ create_gitea_admin_user() {
     echo "  🔑 Gitea Admin Credentials:"
     echo "      Username: gitadmin"
     echo "      Password: password"
-    echo "      URL: http://www.softfluid.fr/gitea"
+    echo "      URL: http://www.${S3_BUCKET_NAME}.com/gitea"
 
     # Try to generate API token with timeout
     setup_api_token
@@ -1996,6 +2066,13 @@ help() {
     echo "              • Reloads Nginx configuration"
     echo "              • Restarts Docker containers if in Docker mode"
     echo ""
+    echo "  upgrade   - Upgrade application from git remote"
+    echo "  --upgrade - Upgrade application from git remote (alias for upgrade)"
+    echo "              • Stashes uncommitted changes if any"
+    echo "              • Fetches latest changes from remote (git fetch --all)"
+    echo "              • Merges changes from origin into current branch"
+    echo "              • Restores stashed changes after merge"
+    echo ""
     echo "  ps        - Show status of all services"
     echo "  -p        - Show status of all services (alias for ps)"
     echo "  --ps      - Show status of all services (alias for ps)"
@@ -2054,7 +2131,7 @@ help() {
     echo "  USER_NAME    - Display name for the user (default: 'admin')"
     echo "                 Used in configuration and logging"
     echo ""
-    echo "  USER_EMAIL   - User email address (default: 'admin@softfluid.fr')"
+    echo "  USER_EMAIL   - User email address (default: 'admin@${S3_BUCKET_NAME}.com')"
     echo "                 Used for SSL certificates and notifications"
     echo ""
     echo "  DESCRIPTION  - Deployment description (default: 'Basic Information Display')"
@@ -2088,8 +2165,8 @@ help() {
     echo "  • Docker Containers (optional)"
     echo ""
     echo "ACCESS URLS:"
-    echo "  • Main App: https://www.softfluid.fr"
-    echo "  • Gitea:    https://www.softfluid.fr/gitea"
+    echo "  • Main App: https://www.opcp-psmc.com"
+    echo "  • Gitea:    https://www.opcp-psmc.com/gitea"
     echo "  • Local:    https://localhost (with SSL certificates)"
 }
 
@@ -2171,6 +2248,10 @@ main() {
             ;;
         "restart"|"-r"|"--restart")
             restart_services
+            exit 0
+            ;;
+        "upgrade"|"--upgrade")
+            upgrade
             exit 0
             ;;
         "start"|"-s"|"--start")
