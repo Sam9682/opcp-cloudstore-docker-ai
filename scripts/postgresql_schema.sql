@@ -192,6 +192,7 @@ CREATE TABLE instances (
     service_id BIGINT NOT NULL,
     instance_id VARCHAR(255) NOT NULL,  -- service_name-replica-N
     server_id BIGINT NOT NULL,
+    service_name VARCHAR(255),
     container_id VARCHAR(255),
     status VARCHAR(50) DEFAULT 'pending',  -- pending, running, failed, stopped
     port INTEGER,
