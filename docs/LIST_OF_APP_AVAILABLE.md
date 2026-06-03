@@ -1,6 +1,6 @@
 # List of Available Applications 📋
 
-This document provides a summary of the default applications available on the OPCP AiPoweredStore Docker AI platform.
+This document provides a summary of the default applications available on the OPCP AiPoweredStore Container Serverless AI platform.
 
 These applications are defined in `conf/default_apps` and are automatically provisioned for users.
 
